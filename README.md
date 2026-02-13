@@ -119,11 +119,3 @@ Asegúrate de instalar `opencv-contrib-python` y no `opencv-python`:
 pip uninstall opencv-python -y
 pip install opencv-contrib-python
 ```
-
-## Autor
-
-Juan Diego
-
-## Licencia
-
-MIT
