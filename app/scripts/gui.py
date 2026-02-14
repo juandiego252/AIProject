@@ -1,6 +1,6 @@
 """
-Interfaz gráfica para el sistema de reconocimiento facial.
-Integra captura, entrenamiento y reconocimiento en una sola aplicación.
+Interfaz gráfica para el sistema de reconocimiento facial con Supabase.
+Integra captura, entrenamiento y reconocimiento con registro de sesiones.
 
 Uso: python gui.py
 """
@@ -17,6 +17,20 @@ import cv2
 import imutils
 import numpy as np
 
+# Importar el gestor de sesiones
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
+    from app.db.supabase_session import SupabaseSessionManager
+    SUPABASE_ENABLED = True
+    print("✅ Módulo supabase_session importado correctamente")
+except ImportError as e:
+    print(f"❌ Error de importación: {e}")
+    SUPABASE_ENABLED = False
+except Exception as e:
+    print(f"❌ Error al cargar Supabase: {e}")
+    SUPABASE_ENABLED = False
+
 
 class TipoReconocedor(Enum):
     """Tipos de reconocedores faciales disponibles en OpenCV."""
@@ -31,8 +45,8 @@ class AplicacionReconocimientoFacial:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Sistema de Reconocimiento Facial")
-        self.root.geometry("800x700")
+        self.root.title("Sistema de Reconocimiento Facial + Supabase")
+        self.root.geometry("900x800")
         self.root.resizable(True, True)
 
         self.directorio_imagenes = "images"
@@ -40,10 +54,22 @@ class AplicacionReconocimientoFacial:
         self.reconocimiento_activo = False
         self.hilo_actual = None
 
+        # Inicializar gestor de sesiones
+        self.session_manager = None
+        if SUPABASE_ENABLED:
+            try:
+                self.session_manager = SupabaseSessionManager()
+                self.supabase_status = "✅ Conectado"
+            except Exception as e:
+                self.supabase_status = f"❌ Error: {str(e)[:30]}"
+        else:
+            self.supabase_status = "⚠️ No disponible"
+
         self.configurar_estilo()
         self.crear_interfaz()
 
         self.log("Sistema de Reconocimiento Facial iniciado.")
+        self.log(f"Supabase: {self.supabase_status}")
         self.log(f"Directorio de imágenes: {os.path.abspath(self.directorio_imagenes)}")
         self.actualizar_lista_personas()
 
@@ -67,12 +93,21 @@ class AplicacionReconocimientoFacial:
         main_frame.columnconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
 
+        # Título con estado de Supabase
+        titulo_frame = ttk.Frame(main_frame)
+        titulo_frame.grid(row=0, column=0, columnspan=2, pady=(0, 5))
+
         titulo = ttk.Label(
-            main_frame,
+            titulo_frame,
             text="🎭 Sistema de Reconocimiento Facial",
             style="Header.TLabel",
         )
-        titulo.grid(row=0, column=0, columnspan=2, pady=(0, 15))
+        titulo.pack()
+
+        self.label_supabase = ttk.Label(
+            titulo_frame, text=f"Supabase: {self.supabase_status}", font=("Segoe UI", 9)
+        )
+        self.label_supabase.pack()
 
         self.crear_panel_izquierdo(main_frame)
         self.crear_panel_derecho(main_frame)
@@ -172,9 +207,18 @@ class AplicacionReconocimientoFacial:
         self.spin_camara.set(0)
         self.spin_camara.grid(row=2, column=1, sticky="w", pady=5, padx=(5, 0))
 
+        ttk.Label(panel, text="Intervalo registro:").grid(
+            row=3, column=0, sticky="w", pady=5
+        )
+        self.spin_log_interval = ttk.Spinbox(
+            panel, from_=10, to=120, width=10, increment=10
+        )
+        self.spin_log_interval.set(30)
+        self.spin_log_interval.grid(row=3, column=1, sticky="w", pady=5, padx=(5, 0))
+
         # Frame para botones de reconocimiento
         frame_botones_rec = ttk.Frame(panel)
-        frame_botones_rec.grid(row=3, column=0, columnspan=2, sticky="ew", pady=10)
+        frame_botones_rec.grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
         frame_botones_rec.columnconfigure(0, weight=1)
         frame_botones_rec.columnconfigure(1, weight=1)
 
@@ -192,20 +236,20 @@ class AplicacionReconocimientoFacial:
         self.btn_detener_rec.grid(row=0, column=1, sticky="ew", padx=(5, 0))
 
         ttk.Separator(panel, orient="horizontal").grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=15
+            row=5, column=0, columnspan=2, sticky="ew", pady=15
         )
 
         # === Estado del Sistema ===
         ttk.Label(panel, text="📊 Estado del Sistema", style="Subheader.TLabel").grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(0, 10)
+            row=6, column=0, columnspan=2, sticky="w", pady=(0, 10)
         )
 
         ttk.Label(panel, text="Personas registradas:").grid(
-            row=6, column=0, sticky="nw", pady=5
+            row=7, column=0, sticky="nw", pady=5
         )
 
         lista_frame = ttk.Frame(panel)
-        lista_frame.grid(row=6, column=1, sticky="nsew", pady=5, padx=(5, 0))
+        lista_frame.grid(row=7, column=1, sticky="nsew", pady=5, padx=(5, 0))
 
         self.listbox_personas = tk.Listbox(lista_frame, height=5, width=20)
         scrollbar = ttk.Scrollbar(
@@ -216,12 +260,21 @@ class AplicacionReconocimientoFacial:
         self.listbox_personas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        botones_frame = ttk.Frame(panel)
+        botones_frame.grid(row=8, column=0, columnspan=2, sticky="ew", pady=5)
+        botones_frame.columnconfigure(0, weight=1)
+        botones_frame.columnconfigure(1, weight=1)
+
         ttk.Button(
-            panel, text="🔄 Actualizar Lista", command=self.actualizar_lista_personas
-        ).grid(row=7, column=0, columnspan=2, sticky="ew", pady=5)
+            botones_frame, text="🔄 Actualizar", command=self.actualizar_lista_personas
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
+
+        ttk.Button(
+            botones_frame, text="📊 Stats DB", command=self.mostrar_estadisticas
+        ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
 
         self.label_modelo = ttk.Label(panel, text="Modelo: No cargado")
-        self.label_modelo.grid(row=8, column=0, columnspan=2, sticky="w", pady=5)
+        self.label_modelo.grid(row=9, column=0, columnspan=2, sticky="w", pady=5)
 
     def crear_area_log(self, parent):
         """Crea el área de log en la parte inferior."""
@@ -254,6 +307,33 @@ class AplicacionReconocimientoFacial:
         self.text_log.configure(state="normal")
         self.text_log.delete(1.0, tk.END)
         self.text_log.configure(state="disabled")
+
+    def mostrar_estadisticas(self):
+        """Muestra las estadísticas de Supabase."""
+        if not self.session_manager:
+            messagebox.showwarning("Advertencia", "Supabase no está disponible.")
+            return
+
+        try:
+            stats = self.session_manager.get_statistics()
+
+            msg = f"""📊 ESTADÍSTICAS DE ACCESO
+
+✅ Accesos exitosos: {stats["total_successful"]}
+❌ Accesos fallidos: {stats["total_failed"]}
+
+Por persona:
+"""
+            if stats["by_person"]:
+                for person, count in stats["by_person"].items():
+                    msg += f"  • {person}: {count} accesos\n"
+            else:
+                msg += "  (Sin datos)\n"
+
+            messagebox.showinfo("Estadísticas", msg)
+            self.log("Estadísticas de Supabase consultadas.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al obtener estadísticas:\n{str(e)}")
 
     def actualizar_lista_personas(self):
         """Actualiza la lista de personas registradas."""
@@ -439,6 +519,7 @@ class AplicacionReconocimientoFacial:
 
             datos_rostros = []
             etiquetas = []
+            total_imagenes = 0
 
             for etiqueta, nombre in enumerate(lista_personas):
                 ruta = os.path.join(self.directorio_imagenes, nombre)
@@ -452,6 +533,7 @@ class AplicacionReconocimientoFacial:
                     if imagen is not None:
                         datos_rostros.append(imagen)
                         etiquetas.append(etiqueta)
+                        total_imagenes += 1
 
                         if mostrar_progreso:
                             cv2.imshow(f"Cargando: {nombre}", imagen)
@@ -475,6 +557,19 @@ class AplicacionReconocimientoFacial:
             reconocedor.write(nombre_modelo)
 
             self.log(f"✅ Modelo guardado: {nombre_modelo}")
+
+            # Registrar en Supabase
+            if self.session_manager:
+                for nombre in lista_personas:
+                    ruta = os.path.join(self.directorio_imagenes, nombre)
+                    num_imgs = len(os.listdir(ruta))
+                    self.session_manager.register_training_session(
+                        person_name=nombre,
+                        images_count=num_imgs,
+                        model_type=tipo.value,
+                        success=True,
+                    )
+                self.log("✅ Sesión de entrenamiento registrada en Supabase en gui")
 
         except Exception as e:
             self.log(f"Error en entrenamiento: {str(e)}")
@@ -500,6 +595,7 @@ class AplicacionReconocimientoFacial:
 
         umbral = float(self.spin_umbral.get())
         indice_camara = int(self.spin_camara.get())
+        log_interval = int(self.spin_log_interval.get())
 
         self.reconocimiento_activo = True
         self.btn_reconocer.configure(state="disabled")
@@ -507,7 +603,7 @@ class AplicacionReconocimientoFacial:
 
         self.hilo_actual = threading.Thread(
             target=self._reconocer_thread,
-            args=(modelo_path, umbral, indice_camara),
+            args=(modelo_path, umbral, indice_camara, log_interval),
             daemon=True,
         )
         self.hilo_actual.start()
@@ -518,7 +614,9 @@ class AplicacionReconocimientoFacial:
             self.reconocimiento_activo = False
             self.log("Deteniendo reconocimiento...")
 
-    def _reconocer_thread(self, modelo_path: str, umbral: float, indice_camara: int):
+    def _reconocer_thread(
+        self, modelo_path: str, umbral: float, indice_camara: int, log_interval: int
+    ):
         """Hilo de reconocimiento."""
         try:
             self.log("Iniciando reconocimiento facial...")
@@ -543,6 +641,10 @@ class AplicacionReconocimientoFacial:
                 cv2.data.haarcascades + "haarcascade_frontalface_default.xml"  # type: ignore
             )
 
+            frame_counter = 0
+            last_logged_frame = -log_interval
+            last_logged_person = None
+
             while self.reconocimiento_activo:
                 ret, frame = cap.read()
                 if not ret:
@@ -553,8 +655,11 @@ class AplicacionReconocimientoFacial:
                     frame_gris, scaleFactor=1.3, minNeighbors=5
                 )
 
+                logged_this_frame = False
+
                 for x, y, w, h in rostros:
                     rostro = frame_gris[y : y + h, x : x + w]
+                    rostro_color = frame[y : y + h, x : x + w]
                     rostro = cv2.resize(
                         rostro, (150, 150), interpolation=cv2.INTER_CUBIC
                     )
@@ -564,9 +669,45 @@ class AplicacionReconocimientoFacial:
                     if confianza < umbral and etiqueta < len(lista_personas):
                         nombre = lista_personas[etiqueta]
                         color = (0, 255, 0)
+                        access_granted = True
                     else:
                         nombre = "Desconocido"
                         color = (0, 0, 255)
+                        access_granted = False
+
+                    # Registrar en Supabase
+                    should_log = self.session_manager and (
+                        frame_counter - last_logged_frame >= log_interval
+                        or last_logged_person != nombre
+                    )
+
+                    if should_log:
+                        try:
+                            if access_granted:
+                                self.session_manager.log_successful_access(
+                                    person_name=nombre,
+                                    confidence=confianza,
+                                    face_image=rostro_color,
+                                    additional_data={"threshold": umbral},
+                                )
+                            else:
+                                reason = (
+                                    "unknown_person"
+                                    if nombre == "Desconocido"
+                                    else "low_confidence"
+                                )
+                                self.session_manager.log_failed_access(
+                                    confidence=confianza,
+                                    face_image=rostro_color,
+                                    reason=reason,
+                                    additional_data={"threshold": umbral},
+                                )
+
+                            logged_this_frame = True
+                            last_logged_frame = frame_counter
+                            last_logged_person = nombre
+                        except Exception as e:
+                            self.log(f"Error al registrar: {str(e)}")
 
                     cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
                     cv2.putText(
@@ -588,7 +729,31 @@ class AplicacionReconocimientoFacial:
                         1,
                     )
 
+                    if logged_this_frame:
+                        cv2.putText(
+                            frame,
+                            "DB: OK",
+                            (x + w - 60, y + h + 20),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.4,
+                            (0, 255, 255),
+                            1,
+                        )
+
+                # Status overlay
+                status_text = f"DB: {'ON' if self.session_manager else 'OFF'} | Frame: {frame_counter}"
+                cv2.putText(
+                    frame,
+                    status_text,
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 255, 255),
+                    2,
+                )
+
                 cv2.imshow("Reconocimiento Facial - ESC para salir", frame)
+                frame_counter += 1
 
                 if cv2.waitKey(1) == 27:
                     break
@@ -596,6 +761,13 @@ class AplicacionReconocimientoFacial:
             cap.release()
             cv2.destroyAllWindows()
             self.log("Reconocimiento finalizado.")
+
+            # Mostrar estadísticas
+            if self.session_manager:
+                stats = self.session_manager.get_statistics()
+                self.log(
+                    f"Estadísticas: {stats['total_successful']} exitosos, {stats['total_failed']} fallidos"
+                )
 
         except Exception as e:
             self.log(f"Error en reconocimiento: {str(e)}")
